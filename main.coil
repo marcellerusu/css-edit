@@ -1,25 +1,123 @@
 import "./html.coil"
-import {parse_decl} from "./css-parser.coil"
+import {parse_decl, parse_query, parse_value_step, attr} from "./css-parser.coil"
 import {run} from "./parse-utils.coil"
 import {to_html, compile, to_ast} from "./html-ast.coil"
 import {parse_cx_query} from "./cx-parser.coil"
 import plugins from "./plugins"
+import try! from "./try!.js"
 
-document:styleSheets.0:rules.zip(0..).map(|[rule idx]| [parse_decl.run(rule:cssText).0, idx]).each(|[css_ast_node idx]| {  
-  let css_decl = to_html(css_ast_node)
-  let root_path = "/Users/marcelrusu/Documents/Projects/css-edit/"
-  let absolute_path = document:styleSheets.0:ownerNode:getAttribute("data-vite-dev-id")
-  let relative_path = absolute_path:slice(root_path.len())
+let postfix? = Set["width" "color" "style"]
 
-  css_decl:setAttribute("data-css-index", idx)
-  css_decl:setAttribute("data-file-path", relative_path)
-  css_decl:prepend(:a{
-    href: str("vscode://file" absolute_path),
-    children: relative_path,
-    class: "open-in-vscode"
-  })
-  $(".--css-edit-editor"):append(css_decl)
-})
+let parts = {
+  outline: ["outline-color" "outline-style" "outline-width"]
+  gap: ["row-gap" "column-gap"]
+}
+
+def handle_long_form(style_map)
+  let out = {}
+  for [key sub_parts] of parts
+    if sub_parts.any?(style_map:get) and style_map:get(key)
+      out.key = [style_map:get(key)]
+    end
+  end
+  let rejected = out.keys().flat_map(parts).into(Set[])
+  return style_map.reject(0 rejected).into(out)
+end
+
+def parse_rules(rules) = rules.zip(0..).map(|[rule idx]| ({
+  idx, kind: :rule, properties: handle_long_form(rule:styleMap),
+  selector: parse_query.run(rule:selectorText, /^$/).0
+  rules: parse_rules(rule:cssRules)
+}))
+
+let root_path = "/Users/marcelrusu/Documents/Projects/css-edit/"
+def get_file_path(sheet_idx) = {
+  absolute_path: document:styleSheets.sheet_idx:ownerNode:getAttribute("data-vite-dev-id")
+  def :relative_path = absolute_path:slice(root_path.len())
+}
+
+protocol html
+
+def String:prototype.html = to_html(parse_value_step.run(this).0)
+def Number:prototype.html = :div{"data-value" => this, "data-numeric" => true, contenteditable: true, children: [this]}
+def CSSStyleValue:prototype.html(property_name)
+  assert!(!this:toString().empty?(), "Unexpected empty value")
+  return to_html(parse_value_step.run(this:toString()).0)
+end
+def CSSUnitValue:prototype.html
+  return :div{
+    "data-kind" => :unit
+    "data-unit" => this:unit
+    children: [:div{"data-value" => this:value, contenteditable: true, children: [this:value]}]
+  }
+end
+def CSSKeywordValue:prototype.html = :div{"data-kind" => :keyword, children: [
+  :div{"data-value" => this:value, contenteditable: true, children: [this:value]}
+]}
+def CSSUnparsedValue:prototype.html
+  assert!(this.count() == 1, "unparsed values only allow 1 value")
+  if type_of(this.0) == "string"
+    return to_html(parse_value_step.run(this.0:toString()).0)
+  else
+    return this.0.html()
+  end
+end
+def CSSMathNegate:prototype.html = :div{"data-kind" => :math_negate, children: [this:value.html()]}
+def CSSVariableReferenceValue:prototype.html = :div{
+  "data-kind" => :var,
+  children: [:div{"data-attr" => :name, children: [this:variable.html()]}],
+  "data-fallback" => this:fallback
+}
+def CSSNumericArray:prototype.html = :div{"data-kind" => :numeric_array, children: this.map(|node| node.html())}
+def CSSMathSum:prototype.html = :div{"data-kind" => :math_sum, children: [this:values.html()]}
+
+export def rule_to_html({idx, properties, selector, rules}) = :div{
+  "data-kind" => "rule"
+  "data-css-idx" => rules
+  children: [
+    :div{"data-attr" => :selector, children: [selector and to_html(selector)]}
+    :div{"data-attr" => :properties, children: properties.map(|[name value]| :div{
+      "data-kind" => "property"
+      children: [
+        :div{"data-attr" => "name", children: [:div{"data-value" => name, children: [name]}]}
+        :div{
+          "data-attr" => "values",
+          children: value
+            .map(try!(|val| val.html(name)))
+            .map(|val| {
+              if val:err
+                let {args: [v]} = val
+                return :div{"data-kind" => :errored, "data-value" => v, "data-error-msg" => val:err:toString(), children: [v]}
+              else
+                return val
+              end
+            })
+            .into([])
+        }
+      ]
+    })}
+    :div{"data-attr" => :rules, children: rules.map(rule_to_html)}
+  ]
+}
+
+let a = performance:now()
+parse_rules(document:styleSheets.0:rules).map(rule_to_html).each($(".--css-edit-editor"):append)
+performance:now().-(a).log()
+
+-- document:styleSheets.0:rules.zip(0..).map(|[rule idx]| [parse_decl.run(rule:cssText).0, idx]).each(|[css_ast_node idx]| {  
+--   let css_decl = to_html(css_ast_node)
+--   let absolute_path = document:styleSheets.0:ownerNode:getAttribute("data-vite-dev-id")
+--   let relative_path = absolute_path:slice(root_path.len())
+
+--   css_decl:setAttribute("data-css-index", idx)
+--   css_decl:setAttribute("data-file-path", relative_path)
+--   css_decl:prepend(:a{
+--     href: str("vscode://file" absolute_path),
+--     children: relative_path,
+--     class: "open-in-vscode"
+--   })
+--   $(".--css-edit-editor"):append(css_decl)
+-- })
 
 -- warn on unused query
 -- store active keys on editor elements with data attributes
@@ -146,10 +244,10 @@ def init(root)
       async def :eval_css(new_root)
         new_root = new_root or root
         -- root might be .--css-edit-editor or <body>.. not sure if this is gonna cause issues later or not - it will :)
-        let html_node = new_root:closest("[data-kind=decl][data-css-index]") or new_root.query("[data-kind=decl]")
+        let html_node = new_root:closest("[data-kind=rule][data-css-index]") or new_root.query("[data-kind=rule]")
         -- if what I've updated is just a value in a rule (most the time)
-        -- find the sheet & update the rule directly instead of recompiling the entire decl!! this will be huge!
-        if !html_node panic!("could not find nearest decl") end
+        -- find the sheet & update the rule directly instead of recompiling the entire rule!! this will be huge!
+        if !html_node panic!("could not find nearest rule") end
         let ast_node = html_node.to_ast()
         let idx = html_node:getAttribute("data-css-index").as_num()
         let {sheet, attributes} = $("[data-vite-dev-id$=\"" html_node:getAttribute("data-file-path") "\"]")
@@ -174,4 +272,4 @@ def init(root)
   end
 end
 
-init(document:body)
+-- init(document:body)

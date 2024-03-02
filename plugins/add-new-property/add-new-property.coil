@@ -1,4 +1,4 @@
-import "./add-new-rule.css"
+import "./add-new-property.css"
 import {parse_rule} from "../../css-parser.coil"
 import {run} from "../../parse-utils.coil"
 import {to_html} from "../../html-ast.coil"
@@ -13,9 +13,9 @@ def Object:prototype.map_ctor(Ctor, cb)
   end
 end
 
-def add_new_rule({signal, root, rebuild, scope})
-  for rules of root.query_all("[data-kind=decl]:not(:has(.plugin_add_new_rule_btn)) [data-attr=rules]")
-    rules:append(:button{
+def add_new_property({signal, root, rebuild, scope})
+  for properties of root.query_all("[data-kind=rule]:not(:has(.plugin_add_new_rule_btn)) [data-attr=properties]")
+    properties:append(:button{
       class: scope:class(:btn),
       children: "+",
       def :onclick(e)
@@ -27,7 +27,7 @@ def add_new_rule({signal, root, rebuild, scope})
             if e:key == "Backspace"
               if this:innerText == ""
                 this:remove()
-                rebuild(root:closest("[data-kind=decl]"))
+                rebuild(root:closest("[data-kind=rule]"))
               end
             else if e:key == "Enter"
               e:preventDefault()
@@ -37,7 +37,7 @@ def add_new_rule({signal, root, rebuild, scope})
               end
               if let ast_node = try!(|| parse_rule.run(css_rule_text).0).map_ctor(Error, |e| nil)
                 this:replaceWith(to_html(ast_node))
-                await rebuild(root:closest("[data-kind=decl]"))
+                await rebuild(root:closest("[data-kind=rule]"))
               else
                 this:setAttribute(scope:data(:error), true)
               end
@@ -51,4 +51,4 @@ def add_new_rule({signal, root, rebuild, scope})
   end
 end
 
-export default add_new_rule
+export default add_new_property

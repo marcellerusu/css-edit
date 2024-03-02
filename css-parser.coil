@@ -2,7 +2,7 @@ import {test capture! chomp! trimmed trimmed! trim_before! trim debug run} from 
 
 let digit_regex = /^[+-]?([0-9]*[.])?[0-9]+/
 
-def attr(value) = {attr_only: true, value}
+export def attr(value) = {attr_only: true, value}
 
 def* parse_class_selector
   yield chomp!(".")
@@ -121,13 +121,17 @@ def* parse_query_step
   end
 end
 
-def* parse_query(end_pattern, skip_step)
+export def* parse_query(end_pattern, skip_step)
   let query = nil
   -- this is a fucking mess, please unify this with self_sub_decl
   if yield trimmed(test("&"))
     yield trim()
     yield chomp!("&")
-    query = {kind: :self_query, value: yield* parse_query_step()}
+    if yield test(" ")
+      query = {kind: :self_sub_query}
+    else
+      query = {kind: :self_query, value: yield* parse_query_step()}
+    end
   else if !skip_step
     query = yield* parse_query_step()
   end
